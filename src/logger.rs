@@ -14,38 +14,72 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub(crate) struct FileHandle {
+    inner: File,
+    size: u64,
+}
+
+#[derive(Debug)]
 pub(crate) struct Logger {
     pub(crate) log_level: LogLevel,
     pub(crate) log_dir: String,
     pub(crate) log_file_name: String,
     pub(crate) log_file_extn: String,
-    pub(crate) file_handle: Mutex<File>,
+    pub(crate) file_handle: Mutex<Option<FileHandle>>,
     pub(crate) rotation_policy: RotationPolicy,
     pub(crate) next_rotation_time: RwLock<i64>,
     pub(crate) compress: bool,
     pub(crate) delay_compress: bool,
-    pub(crate) if_empty: bool,
     pub(crate) rotation_remove: RotationRemove,
+}
+
+impl FileHandle {
+    pub(crate) fn new(inner: File, size: u64) -> Self {
+        Self { inner, size }
+    }
+
+    pub(crate) fn write_message(&mut self, message: &str) -> std::io::Result<()> {
+        let size = message.len() as u64;
+        let file = self.inner.by_ref();
+        file.write_all(message.as_bytes())?;
+        file.flush()?;
+        self.size += size;
+        Ok(())
+    }
 }
 
 impl Logger {
     fn write_message(&self, message: &str) -> Result<(), Box<dyn Error + '_>> {
+        self.rotate_log()?;
         let mut handle = self.file_handle.lock()?;
-        handle.write_all(message.as_bytes())?;
-        handle.flush()?;
+        if let Some(handle) = handle.as_mut() {
+            handle.write_message(message)?;
+        }
         Ok(())
     }
-    // TODO: Instead of reading file size from the metadata
-    // keep a couter field which will keep on updating with write messages
+
     fn file_size(&self) -> Result<u64, Box<dyn Error + '_>> {
-        let len = self.file_handle.lock()?.metadata()?.len();
-        Ok(len)
+        let file_handle = self.file_handle.lock()?;
+        let val = match *file_handle {
+            Some(ref handle) => handle.size,
+            _ => 0,
+        };
+        Ok(val)
     }
 
     fn rotate_log(&self) -> Result<(), Box<dyn Error + '_>> {
-        if self.should_rotate()? {
-            let mut file = self.file_handle.lock()?;
-            let file = file.by_ref();
+        let should_rotate = self.should_rotate()?;
+        eprintln!("should_rotate: {}", should_rotate);
+        if !should_rotate {
+            return Ok(());
+        }
+        self.remove_old_files()?;
+        self.compress_old_files()?;
+        // NOTE: lock on file_handle should be kept until file is truncated
+        // and file_size reset
+        let mut handle = self.file_handle.lock()?;
+        let log_path = log_file_path(&self.log_dir, &self.log_file_name, &self.log_file_extn);
+        if !self.is_zero_rotation_remove() {
             let compress = self.compress && !self.delay_compress;
             let roll_path = rolled_log_path(
                 &self.log_dir,
@@ -54,26 +88,38 @@ impl Logger {
                 compress,
             );
             let out_file = File::create(&roll_path)?;
-            copy_file(file, out_file, compress)?;
-            truncate_file(file)?;
-            self.remove_old_files()?;
-            compress_old_files(&self.log_dir, &self.log_file_name, &self.log_file_extn)?;
+            handle.take().ok_or("counld not get file handle")?;
+            let mut file = File::open(&log_path)?;
+            copy_file(&mut file, out_file, compress)?;
         }
+        let mut file = File::options().append(true).create(true).open(&log_path)?;
+        truncate_file(&mut file)?;
+        *handle = Some(FileHandle::new(file, 0));
         Ok(())
+    }
+
+    fn is_zero_rotation_remove(&self) -> bool {
+        match self.rotation_remove {
+            RotationRemove::ByCount(0) => true,
+            _ => false,
+        }
     }
 
     fn remove_old_files(&self) -> Result<(), Box<dyn Error + '_>> {
         match self.rotation_remove {
-            RotationRemove::ByCount(count) => remove_file_by_count(
-                &self.log_dir,
-                &self.log_file_name,
-                &self.log_file_extn,
-                count as usize,
-            )?,
-            RotationRemove::ByMaxAge(age) => {
-                remove_files_by_age(&self.log_dir, &self.log_file_name, &self.log_file_extn, age)?
+            RotationRemove::ByCount(count) => {
+                let count = if count > 0 { count as usize - 1 } else { 0 };
+                remove_file_by_count(
+                    &self.log_dir,
+                    &self.log_file_name,
+                    &self.log_file_extn,
+                    count,
+                )
             }
-        };
+            RotationRemove::ByMaxAge(age) => {
+                remove_files_by_age(&self.log_dir, &self.log_file_name, &self.log_file_extn, age)
+            }
+        }?;
         Ok(())
     }
 
@@ -81,7 +127,7 @@ impl Logger {
         if !self.compress || !self.delay_compress {
             return Ok(());
         }
-
+        compress_old_files(&self.log_dir, &self.log_file_name, &self.log_file_extn)?;
         Ok(())
     }
 
@@ -102,7 +148,10 @@ impl Logger {
             self.update_next_rotation_time()?;
         }
         let val = match self.rotation_policy {
-            RotationPolicy::MaxSizeOnly(size) => file_size >= size,
+            RotationPolicy::MaxSizeOnly(size) => {
+                eprintln!("file_size: {}, size: {}", file_size, size);
+                file_size >= size
+            }
             RotationPolicy::MaxSizeOrRotationTime(size, _) => {
                 has_crossed_rotation_time(next_rotation_time) || file_size >= size
             }

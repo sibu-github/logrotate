@@ -26,7 +26,6 @@ pub fn builder() -> Builder<NoFilePath, NoMaxSize, NoMinSize> {
         min_size,
         compress: false,
         delay_compress: false,
-        if_empty: false,
         rotation_remove,
     };
     builder

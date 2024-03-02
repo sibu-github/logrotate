@@ -6,7 +6,10 @@ use std::{
 use chrono::Utc;
 use log::Level as LogLevel;
 
-use crate::{logger::Logger, utils::*};
+use crate::{
+    logger::{FileHandle, Logger},
+    utils::*,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum RotationTime {
@@ -46,7 +49,6 @@ pub struct Builder<T, U, V> {
     pub(crate) min_size: V,
     pub(crate) compress: bool,
     pub(crate) delay_compress: bool,
-    pub(crate) if_empty: bool,
     pub(crate) rotation_remove: RotationRemove,
 }
 
@@ -113,10 +115,6 @@ impl<T, U, V> Builder<T, U, V> {
         self.delay_compress = delay_compress;
         self
     }
-    pub fn if_empty(mut self, if_empty: bool) -> Self {
-        self.if_empty = if_empty;
-        self
-    }
 }
 
 impl<T, U, V> Builder<T, U, V> {
@@ -130,7 +128,6 @@ impl<T, U, V> Builder<T, U, V> {
             min_size: self.min_size,
             compress: self.compress,
             delay_compress: self.delay_compress,
-            if_empty: self.if_empty,
             rotation_remove,
         }
     }
@@ -144,7 +141,6 @@ impl<T, U, V> Builder<T, U, V> {
             min_size: self.min_size,
             compress: self.compress,
             delay_compress: self.delay_compress,
-            if_empty: self.if_empty,
             rotation_remove,
         }
     }
@@ -160,7 +156,6 @@ impl<T> Builder<T, NoMaxSize, NoMinSize> {
             min_size: self.min_size,
             compress: self.compress,
             delay_compress: self.delay_compress,
-            if_empty: self.if_empty,
             rotation_remove: self.rotation_remove,
         }
     }
@@ -173,7 +168,6 @@ impl<T> Builder<T, NoMaxSize, NoMinSize> {
             min_size,
             compress: self.compress,
             delay_compress: self.delay_compress,
-            if_empty: self.if_empty,
             rotation_remove: self.rotation_remove,
         }
     }
@@ -189,7 +183,6 @@ impl<U, V> Builder<NoFilePath, U, V> {
             min_size: self.min_size,
             compress: self.compress,
             delay_compress: self.delay_compress,
-            if_empty: self.if_empty,
             rotation_remove: self.rotation_remove,
         }
     }
@@ -224,24 +217,24 @@ impl<U: 'static, V: 'static> Builder<String, U, V> {
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let rotation_policy = self.rotation_policy();
         let next_rotation_time = RwLock::new(self.rotation_time.next_rotation_time());
-        let file_handle = File::options()
+        let file = File::options()
             .create(true)
             .append(true)
             .open(&self.file_path)?;
-        let file_handle = Mutex::new(file_handle);
+        let size = file.metadata()?.len();
+        let file_handle = FileHandle::new(file, size);
+        let file_handle = Mutex::new(Some(file_handle));
         let logger = Logger {
             log_level: self.log_level,
             log_dir,
             log_file_name,
             log_file_extn,
             file_handle,
-            rotation_policy,
+            rotation_policy: self.rotation_policy(),
             next_rotation_time,
             compress: self.compress,
             delay_compress: self.delay_compress,
-            if_empty: self.if_empty,
             rotation_remove: self.rotation_remove,
         };
         log::set_max_level(self.log_level.to_level_filter());

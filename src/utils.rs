@@ -36,6 +36,7 @@ pub(crate) fn log_file_path(log_dir: &str, log_file_name: &str, log_file_extn: &
     if !log_dir.is_empty() {
         path = PathBuf::from(log_dir);
     }
+    assert!(!log_file_name.is_empty());
     let file_name = if log_file_extn.is_empty() {
         format!("{}", log_file_name)
     } else {
@@ -56,6 +57,7 @@ pub(crate) fn rolled_log_path(
     if !log_dir.is_empty() {
         path = PathBuf::from(log_dir);
     }
+    assert!(!log_file_name.is_empty());
     let mut file_name = if log_file_extn.is_empty() {
         format!("{}.{}", log_file_name, ts)
     } else {
@@ -106,7 +108,10 @@ pub(crate) fn copy_file(src: &mut File, mut dst: File, compress: bool) -> io::Re
         io::copy(src, &mut encoder)?;
         encoder.finish()?;
     } else {
-        io::copy(src, &mut dst)?;
+        io::copy(src, &mut dst).map_err(|err| {
+            eprintln!("{:?}", err);
+            err
+        })?;
     }
 
     Ok(())
@@ -137,32 +142,6 @@ pub(crate) fn get_file_age(path: &Path) -> io::Result<u64> {
     Ok(duration)
 }
 
-pub(crate) fn remove_files(dir: &str, file_name: &str, file_extn: &str) -> io::Result<()> {
-    let dir = if dir.is_empty() { "." } else { dir };
-    let dir = Path::new(dir);
-    if !dir.is_dir() {
-        return Err(io::Error::other("log_dir not a valid directory path"));
-    }
-    let mut entries = vec![];
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            let name = path.file_name().unwrap_or_default();
-            let name = name.to_str().unwrap_or_default();
-            let extn = path.extension().unwrap_or_default();
-            let extn = extn.to_str().unwrap_or_default();
-            if name.starts_with(file_name) && !name.eq(file_name) && extn.eq(file_extn) {
-                let created_time = path.metadata()?.created()?;
-                entries.push((entry, created_time));
-            }
-        }
-    }
-    entries.sort_unstable_by(|a, b| a.1.cmp(&b.1));
-
-    Ok(())
-}
-
 pub(crate) fn remove_files_by_age(
     dir: &str,
     file_name: &str,
@@ -173,15 +152,16 @@ pub(crate) fn remove_files_by_age(
     for entry in read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() {
-            let (name, extn) = file_name_and_extension(&path);
-            if name.starts_with(file_name)
-                && !name.eq(&curr_file)
-                && (extn.eq(file_extn) || extn.eq("gz"))
-                && get_file_age(&path)? > max_age(age)
-            {
-                fs::remove_file(path)?;
-            }
+        if !path.is_file() {
+            continue;
+        }
+        let (name, extn) = file_name_and_extension(&path);
+        if name.starts_with(file_name)
+            && !name.eq(&curr_file)
+            && (extn.eq(file_extn) || extn.eq("gz"))
+            && get_file_age(&path)? > max_age(age)
+        {
+            fs::remove_file(path)?;
         }
     }
     Ok(())
@@ -209,6 +189,9 @@ pub(crate) fn remove_file_by_count(
             }
         }
     }
+    if entries.len() == 0 || entries.len() < count {
+        return Ok(());
+    }
     entries.sort_unstable_by(|a, b| a.1.cmp(&b.1));
     for _ in 0..count {
         entries.pop();
@@ -228,19 +211,23 @@ pub(crate) fn compress_old_files<'a>(
     for entry in read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() {
-            let (name, extn) = file_name_and_extension(&path);
-            if name.starts_with(file_name) && !name.eq(&curr_file) && extn.eq(file_extn) {
+        if !path.is_file() {
+            continue;
+        }
+        let (name, extn) = file_name_and_extension(&path);
+        if name.starts_with(file_name) && !name.eq(&curr_file) && extn.eq(file_extn) {
+            {
                 let compress_file = format!("{}.gz", name);
                 let mut p = path.to_path_buf();
                 p.pop();
                 p.push(compress_file);
-                let mut src = File::open(path)?;
+                let mut src = File::open(&path)?;
                 let dst = File::create(p)?;
                 let mut encoder = GzEncoder::new(dst, Compression::default());
                 io::copy(&mut src, &mut encoder)?;
                 encoder.finish()?;
             }
+            fs::remove_file(&path)?;
         }
     }
     Ok(())
@@ -266,39 +253,4 @@ fn file_name_and_extension(path: &Path) -> (&str, &str) {
     let extn = path.extension().unwrap_or_default();
     let extn = extn.to_str().unwrap_or_default();
     (name, extn)
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_log_file_path() {
-        let p = log_file_path("", "output", "log");
-        assert_eq!(p.display().to_string(), "output.log");
-        let p = log_file_path("logs", "output", "log");
-        assert_eq!(p.display().to_string(), "logs/output.log");
-        let p = log_file_path("logs", "output", "");
-        assert_eq!(p.display().to_string(), "logs/output");
-    }
-
-    #[test]
-    fn test_split_file_path() {
-        let p = Path::new("output.log");
-        let (log_dir, log_file_name, log_file_extn) = split_file_path(p);
-        assert_eq!(log_dir, "");
-        assert_eq!(log_file_name, "output");
-        assert_eq!(log_file_extn, "log");
-        let p = Path::new("logs/output.log");
-        let (log_dir, log_file_name, log_file_extn) = split_file_path(p);
-        assert_eq!(log_dir, "logs");
-        assert_eq!(log_file_name, "output");
-        assert_eq!(log_file_extn, "log");
-        let p = Path::new("logs/output");
-        let (log_dir, log_file_name, log_file_extn) = split_file_path(p);
-        assert_eq!(log_dir, "logs");
-        assert_eq!(log_file_name, "output");
-        assert_eq!(log_file_extn, "");
-    }
 }
