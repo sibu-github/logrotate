@@ -6,7 +6,10 @@ use std::{
 
 use chrono::Utc;
 
-use crate::utils::*;
+use crate::{
+    builder::{RotationPolicy, RotationTime},
+    utils::*,
+};
 
 mod test_utils {
     use std::{
@@ -67,6 +70,7 @@ mod test_utils {
 #[test]
 fn test_logger() {
     let file_name = "testloggeroutput.log";
+    let (_t, _f) = test_utils::TestDataFile::create(file_name);
     let r = crate::builder().file_path(file_name).finish();
     assert_eq!(r.is_ok(), true);
     for i in 0..100 {
@@ -74,9 +78,103 @@ fn test_logger() {
     }
     let mut content = String::new();
     let mut file = File::open(file_name).unwrap();
-    // let (_t, mut file) = test_utils::TestDataFile::create(file_name);
     file.read_to_string(&mut content).unwrap();
-    eprintln!("{}", content);
+    let lines = content.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 100);
+}
+
+#[test]
+fn test_logger_blank_file_path() {
+    let r = crate::builder().file_path("").finish();
+    assert_eq!(r.is_ok(), false);
+}
+
+#[test]
+fn test_logger_rotation_time() {
+    let curr_ts = Utc::now().timestamp_millis();
+    let next_rotation_time = crate::builder()
+        .minutely()
+        .rotation_time
+        .next_rotation_time();
+    let target = curr_ts + MIN_AS_MILLI_SEC;
+    assert_eq!(next_rotation_time >= target, true);
+    assert_eq!(next_rotation_time < target + 1, true);
+
+    let curr_ts = Utc::now().timestamp_millis();
+    let next_rotation_time = crate::builder().hourly().rotation_time.next_rotation_time();
+    let target = curr_ts + HOUR_AS_MILLI_SEC;
+    assert_eq!(next_rotation_time >= target, true);
+    assert_eq!(next_rotation_time < target + 1, true);
+
+    let curr_ts = Utc::now().timestamp_millis();
+    let next_rotation_time = crate::builder().daily().rotation_time.next_rotation_time();
+    let target = curr_ts + DAY_AS_MILLI_SEC;
+    assert_eq!(next_rotation_time >= target, true);
+    assert_eq!(next_rotation_time < target + 1, true);
+
+    let curr_ts = Utc::now().timestamp_millis();
+    let next_rotation_time = crate::builder().weekly().rotation_time.next_rotation_time();
+    let target = curr_ts + WEEK_AS_MILLI_SEC;
+    assert_eq!(next_rotation_time >= target, true);
+    assert_eq!(next_rotation_time < target + 1, true);
+
+    let curr_ts = Utc::now().timestamp_millis();
+    let next_rotation_time = crate::builder()
+        .monthly()
+        .rotation_time
+        .next_rotation_time();
+    let target = curr_ts + MONTH_AS_MILLI_SEC;
+    assert_eq!(next_rotation_time >= target, true);
+    assert_eq!(next_rotation_time < target + 1, true);
+
+    let curr_ts = Utc::now().timestamp_millis();
+    let next_rotation_time = crate::builder().yearly().rotation_time.next_rotation_time();
+    let target = curr_ts + YEAR_AS_MILLI_SEC;
+    assert_eq!(next_rotation_time >= target, true);
+    assert_eq!(next_rotation_time < target + 1, true);
+
+    let next_rotation_time = crate::builder().rotation_time.next_rotation_time();
+    assert_eq!(next_rotation_time, 0);
+}
+
+#[test]
+fn test_rotation_policy() {
+    let policy = crate::builder()
+        .file_path("tst")
+        .daily()
+        .max_size(2048)
+        .rotation_policy();
+    match policy {
+        RotationPolicy::MaxSizeOrRotationTime(2048, RotationTime::Daily) => {}
+        _ => panic!("incorrect"),
+    }
+    let policy = crate::builder()
+        .file_path("tst")
+        .daily()
+        .min_size(2048)
+        .rotation_policy();
+    match policy {
+        RotationPolicy::MinSizeAndRotationTime(2048, RotationTime::Daily) => {}
+        _ => panic!("incorrect"),
+    }
+    let policy = crate::builder()
+        .file_path("tst")
+        .max_size(2048)
+        .rotation_policy();
+    match policy {
+        RotationPolicy::MaxSizeOnly(2048) => {}
+        _ => panic!("incorrect"),
+    }
+    let policy = crate::builder().file_path("tst").weekly().rotation_policy();
+    match policy {
+        RotationPolicy::RotationTimeOnly(RotationTime::Weekly) => {}
+        _ => panic!("incorrect"),
+    }
+    let policy = crate::builder().file_path("tst").rotation_policy();
+    match policy {
+        RotationPolicy::RotationTimeOnly(RotationTime::Never) => {}
+        _ => panic!("incorrect"),
+    }
 }
 
 #[test]

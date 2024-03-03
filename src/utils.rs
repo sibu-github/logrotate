@@ -205,11 +205,7 @@ pub(crate) fn remove_file_by_count(
     Ok(())
 }
 
-pub(crate) fn compress_old_files<'a>(
-    dir: &'a str,
-    file_name: &'a str,
-    file_extn: &'a str,
-) -> Result<(), Box<dyn std::error::Error + 'a>> {
+pub(crate) fn compress_old_files(dir: &str, file_name: &str, file_extn: &str) -> io::Result<()> {
     assert!(!file_name.is_empty());
     let curr_file = log_file_full_name(file_name, file_extn);
     for entry in read_dir(dir)? {

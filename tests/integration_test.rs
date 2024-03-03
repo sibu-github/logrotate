@@ -2,7 +2,6 @@ use logrotate::builder;
 use logrotate::info;
 
 #[test]
-#[ignore]
 fn test_logger() {
     let r = builder()
         .file_path("logs/output.log")
@@ -11,9 +10,9 @@ fn test_logger() {
         .compress(true)
         .delay_compress(true)
         .finish();
-    for i in 0..400 {
+    for i in 0..10 {
         info!("message no: {}", i);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert_eq!(r.is_ok(), true);
 }

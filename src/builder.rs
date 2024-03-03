@@ -95,7 +95,7 @@ impl<T, U, V> Builder<T, U, V> {
         self.rotation_time = RotationTime::Daily;
         self
     }
-    fn weekly(mut self) -> Self {
+    pub fn weekly(mut self) -> Self {
         self.rotation_time = RotationTime::Weekly;
         self
     }
@@ -210,8 +210,8 @@ impl<U: 'static, V: 'static> Builder<String, U, V> {
             return Err("file_path cannot be empty".into());
         }
         let file_path = std::path::Path::new(&self.file_path);
-        let (log_dir, log_file_name, log_file_extn) = split_file_path(file_path);
-        if log_file_name.is_empty() {
+        let (dir, file_name, file_extn) = split_file_path(file_path);
+        if file_name.is_empty() {
             return Err("log_file_name cannot be empty".into());
         }
         if let Some(parent) = file_path.parent() {
@@ -223,13 +223,10 @@ impl<U: 'static, V: 'static> Builder<String, U, V> {
             .append(true)
             .open(&self.file_path)?;
         let size = file.metadata()?.len();
-        let file_handle = FileHandle::new(file, size);
-        let file_handle = Mutex::new(Some(file_handle));
+        let file_handle = FileHandle::new(file, size, dir, file_name, file_extn);
+        let file_handle = Mutex::new(file_handle);
         let logger = Logger {
             log_level: self.log_level,
-            log_dir,
-            log_file_name,
-            log_file_extn,
             file_handle,
             rotation_policy: self.rotation_policy(),
             next_rotation_time,
