@@ -31,17 +31,21 @@ pub(crate) fn has_crossed_rotation_time(next_rotation_time: i64) -> bool {
     next_rotation_time > 0 && next_rotation_time <= curr_ts
 }
 
+fn log_file_full_name(name: &str, extn: &str) -> String {
+    if extn.is_empty() {
+        format!("{}", name)
+    } else {
+        format!("{}.{}", name, extn)
+    }
+}
+
 pub(crate) fn log_file_path(log_dir: &str, log_file_name: &str, log_file_extn: &str) -> PathBuf {
     let mut path = PathBuf::new();
     if !log_dir.is_empty() {
         path = PathBuf::from(log_dir);
     }
     assert!(!log_file_name.is_empty());
-    let file_name = if log_file_extn.is_empty() {
-        format!("{}", log_file_name)
-    } else {
-        format!("{}.{}", log_file_name, log_file_extn)
-    };
+    let file_name = log_file_full_name(log_file_name, log_file_extn);
     path.push(file_name);
     path
 }
@@ -108,10 +112,7 @@ pub(crate) fn copy_file(src: &mut File, mut dst: File, compress: bool) -> io::Re
         io::copy(src, &mut encoder)?;
         encoder.finish()?;
     } else {
-        io::copy(src, &mut dst).map_err(|err| {
-            eprintln!("{:?}", err);
-            err
-        })?;
+        io::copy(src, &mut dst)?;
     }
 
     Ok(())
@@ -121,7 +122,7 @@ pub(crate) fn max_age(age: FileAge) -> u64 {
     age as u64 * 24 * 3600
 }
 
-pub(crate) fn duration_since(time: SystemTime) -> u64 {
+fn duration_since(time: SystemTime) -> u64 {
     let now = SystemTime::now();
     match now.duration_since(time) {
         Ok(n) => n.as_secs(),
@@ -148,7 +149,8 @@ pub(crate) fn remove_files_by_age(
     file_extn: &str,
     age: FileAge,
 ) -> io::Result<()> {
-    let curr_file = format!("{}.{}", file_name, file_extn);
+    assert!(!file_name.is_empty());
+    let curr_file = log_file_full_name(file_name, file_extn);
     for entry in read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -173,7 +175,8 @@ pub(crate) fn remove_file_by_count(
     file_extn: &str,
     count: usize,
 ) -> io::Result<()> {
-    let curr_file = format!("{}.{}", file_name, file_extn);
+    assert!(!file_name.is_empty());
+    let curr_file = log_file_full_name(file_name, file_extn);
     let mut entries = vec![];
     for entry in read_dir(dir)? {
         let entry = entry?;
@@ -207,7 +210,8 @@ pub(crate) fn compress_old_files<'a>(
     file_name: &'a str,
     file_extn: &'a str,
 ) -> Result<(), Box<dyn std::error::Error + 'a>> {
-    let curr_file = format!("{}.{}", file_name, file_extn);
+    assert!(!file_name.is_empty());
+    let curr_file = log_file_full_name(file_name, file_extn);
     for entry in read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();

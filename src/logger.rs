@@ -68,9 +68,7 @@ impl Logger {
     }
 
     fn rotate_log(&self) -> Result<(), Box<dyn Error + '_>> {
-        let should_rotate = self.should_rotate()?;
-        eprintln!("should_rotate: {}", should_rotate);
-        if !should_rotate {
+        if !self.should_rotate()? {
             return Ok(());
         }
         self.remove_old_files()?;
