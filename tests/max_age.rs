@@ -2,14 +2,11 @@ use logrotate::builder;
 use logrotate::info;
 
 #[test]
-fn test_logger() {
+fn test_logger_max_age() {
     let r = builder()
         .log_level(log::Level::Info)
-        .file_path("logs/output.log")
-        .max_size(2 * 1024)
-        .rotation_count(5)
-        .compress(true)
-        .delay_compress(true)
+        .file_path("logs/max-age.log")
+        .max_age(3)
         .finish();
     for i in 0..10 {
         info!("message no: {}", i);

@@ -5,6 +5,7 @@ pub use log::error;
 pub use log::info;
 pub use log::trace;
 pub use log::warn;
+pub use log::Level;
 
 mod builder;
 mod logger;
